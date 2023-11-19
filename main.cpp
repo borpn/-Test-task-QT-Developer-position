@@ -6,6 +6,7 @@
 #include <QGridLayout>
 #include <QThread>
 #include <QMutex>
+//#include <QtSql>
 
 class ScreenCapture : public QWidget {
     Q_OBJECT
@@ -19,6 +20,10 @@ public:
         runningIndecator->setStyleSheet("color: red;");
         imageLabel = new QLabel(this);
         imageLabel->setFixedSize(700, 500);
+        timerLabel = new QLabel("Time until next screenshot: N/A seconds", this);
+        
+        // Take a screenshot of the initial screen after launching the program
+        previousScreenshot = QPixmap::grabWindow(QApplication::desktop()->winId());
 
         gridLayout = new QGridLayout(this);
         setFixedSize(800, 600);
@@ -27,20 +32,25 @@ public:
         gridLayout->addWidget(similarityLabel, 1, 0, 1, 2, Qt::AlignCenter);
         gridLayout->addWidget(imageLabel, 2, 0, 1, 2, Qt::AlignCenter);
         gridLayout->addWidget(runningIndecator, 3, 0, 1, 2, Qt::AlignCenter);
-
-        connect(startButton, &QPushButton::clicked, this, &ScreenCapture::startCapture);
-        connect(stopButton, &QPushButton::clicked, this, &ScreenCapture::stopCapture);
-        connect(this, &ScreenCapture::updateImage, this, &ScreenCapture::displayScreenshot, Qt::QueuedConnection);
+        gridLayout->addWidget(timerLabel, 4, 0, 1, 2, Qt::AlignCenter);
 
         captureTimer = new QTimer(this);
         connect(captureTimer, &QTimer::timeout, this, &ScreenCapture::captureScreen);
         compareThread = new QThread(this);
 
+        timeTrackerTimer = new QTimer(this);
+
+        connect(startButton, &QPushButton::clicked, this, &ScreenCapture::startCapture);
+        connect(stopButton, &QPushButton::clicked, this, &ScreenCapture::stopCapture);
+        connect(this, &ScreenCapture::updateImage, this, &ScreenCapture::displayScreenshot, Qt::QueuedConnection);
+        connect(timeTrackerTimer, &QTimer::timeout, this, &ScreenCapture::updateTimer);
+
+
         moveToThread(compareThread);
         compareThread->start();
 
-        // Take a screenshot of the initial screen after launching the program and rescale it to fit in ours program window
-        imageLabel->setPixmap(QPixmap::grabWindow(QApplication::desktop()->winId()).scaled(imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        // Rescale screenshot of the initial screen to fit in ours program window and display it
+        imageLabel->setPixmap(previousScreenshot.scaled(imageLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 
     ~ScreenCapture() {
@@ -54,6 +64,7 @@ signals:
 public slots:
     void startCapture() {
         captureTimer->start(60000);
+        timeTrackerTimer->start(1000);
         runningIndecator->setText(QString("Program is running"));
         runningIndecator->setStyleSheet("color: green;");
     }
@@ -75,7 +86,7 @@ public slots:
     }
 
     void compareScreenshots(const QPixmap &screenshot) {
-        double similarityPercentage = compareImages(screenshot);
+        double similarityPercentage = compareImages(screenshot, previousScreenshot);
         QMetaObject::invokeMethod(this, "updateUI", Qt::QueuedConnection, Q_ARG(double, similarityPercentage));
         previousScreenshot = screenshot;
     }
@@ -90,10 +101,14 @@ public slots:
         imageLabel->setPixmap(scaledPixmap);
     }
 
+    void updateTimer() {
+        int remainingSeconds = captureTimer->remainingTime() / 1000;
+        timerLabel->setText(QString("Time to next screenshot: %1 seconds").arg(remainingSeconds));
+    }
 private:
-    double compareImages(const QPixmap &screenshot) {
-        QImage img1 = screenshot.toImage();
-        QImage img2 = previousScreenshot.toImage();
+    double compareImages(const QPixmap &screenshot1, const QPixmap &screenshot2) {
+        QImage img1 = screenshot1.toImage();
+        QImage img2 = screenshot2.toImage();
 
         if (img1.size() != img2.size()) {
             qWarning("Images have different sizes");
@@ -130,6 +145,8 @@ private:
     QLabel *imageLabel;
     QGridLayout *gridLayout;
     QTimer *captureTimer;
+    QTimer *timeTrackerTimer;
+    QLabel *timerLabel;
     QThread *compareThread;
     QPixmap previousScreenshot;
 };
